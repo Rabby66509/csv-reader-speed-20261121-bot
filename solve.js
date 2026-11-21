@@ -19,11 +19,17 @@
 // Speed: most records are plain lines — no quote, no stray CR in them — so a whole
 // record is taken at once with one slice and one native split(','). Only a line
 // holding a quote or a CR falls back to the field-by-field reader below, which
-// itself scans with indexOf for the next delimiter instead of walking characters.
+// finds its next delimiter with one native regex scan instead of walking
+// characters.
 
 const COMMA = 0;
 const BREAK = 1;
 const END = 2;
+
+// One native scan for the next delimiter, instead of three indexOf scans: the
+// regex is reset to pos before every exec, so it always finds the nearest of
+// its characters.
+const QDELIM = /["\r\n]/g;
 
 /** csv-reader 1.0.0's answer for one case's input. */
 export function run(input) {
@@ -63,26 +69,18 @@ export function run(input) {
   // '"' when a never-closing quote is re-read as unquoted). Returns [value, ended,
   // added], where added counts the characters kept here (a dropped stray CR adds
   // none). ended is COMMA, BREAK or END.
+  const DELIM = /[,\n\r]/g;
   function readUnquoted(head) {
     let value = head;
     let added = 0;
     for (;;) {
-      const comma = text.indexOf(',', pos);
-      const lf = text.indexOf('\n', pos);
-      const cr = text.indexOf('\r', pos);
+      DELIM.lastIndex = pos;
+      const hit = DELIM.exec(text);
       let stop = -1;
       let what = END;
-      if (comma !== -1) {
-        stop = comma;
-        what = COMMA;
-      }
-      if (lf !== -1 && (stop === -1 || lf < stop)) {
-        stop = lf;
-        what = BREAK;
-      }
-      if (cr !== -1 && (stop === -1 || cr < stop)) {
-        stop = cr;
-        what = 3;
+      if (hit !== null) {
+        stop = hit.index;
+        what = hit[0] === ',' ? COMMA : hit[0] === '\n' ? BREAK : 3;
       }
       if (stop === -1) {
         if (pos < n) {
@@ -132,22 +130,13 @@ export function run(input) {
     let value = '';
     pos += 1;
     for (;;) {
-      const q = text.indexOf('"', pos);
-      const cr = text.indexOf('\r', pos);
-      const lf = text.indexOf('\n', pos);
+      QDELIM.lastIndex = pos;
+      const hit = QDELIM.exec(text);
       let stop = -1;
       let what = 0; // 0: quote, 1: CR, 2: LF
-      if (q !== -1) {
-        stop = q;
-        what = 0;
-      }
-      if (cr !== -1 && (stop === -1 || cr < stop)) {
-        stop = cr;
-        what = 1;
-      }
-      if (lf !== -1 && (stop === -1 || lf < stop)) {
-        stop = lf;
-        what = 2;
+      if (hit !== null) {
+        stop = hit.index;
+        what = hit[0] === '"' ? 0 : hit[0] === '\r' ? 1 : 2;
       }
       if (stop === -1) {
         // The quote never closes: it is a literal character, and the text after
@@ -240,7 +229,7 @@ export function run(input) {
     const effEnd = end > pos && text.charCodeAt(end - 1) === 13 ? end - 1 : end;
     if (effEnd > pos) {
       const segment = text.slice(pos, effEnd);
-      if (segment.indexOf('"') === -1 && segment.indexOf('\r') === -1) {
+      if (!/["\r]/.test(segment)) {
         finish(segment.split(','));
         if (lineEnd === -1) {
           pos = n;
